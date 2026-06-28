@@ -34,6 +34,58 @@
       ],
       "id": "1c4d11b2-e628-4ba9-8753-bbfdcc445302",
       "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "8842f527-ae61-4332-8277-6776b9d8cddc",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "escalated_to_human",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        416,
+        0
+      ],
+      "id": "820469a9-2176-4be2-8020-475afca95a6d",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://webhook.site/5a5100b0-f2dc-4f02-b7db-1da20a0fd441",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"Ticket {{ $('Webhook').item.json.body.ticket_id }} escalated to human review — category: {{ $('If').item.json.category }}, priority: {{ $('If').item.json.priority }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        624,
+        -96
+      ],
+      "id": "4d552a2b-725b-4ff6-a900-6d111a3bf3ae",
+      "name": "HTTP Request1"
     }
   ],
   "pinData": {},
@@ -48,6 +100,28 @@
           }
         ]
       ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
@@ -56,7 +130,7 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "8278874e-274b-41d8-b0b1-8109950b47e0",
+  "versionId": "759975f5-053c-4556-8beb-567cb17dca2c",
   "meta": {
     "instanceId": "8c8a998bc95ce6e08d8c02faaf8fd55f311d8a7aefbfd6584758495f5aac1125"
   },

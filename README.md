@@ -7,7 +7,7 @@ agent, which classifies the ticket and decides what to do with it.
 ## How it works
 
 ```
-n8n Webhook (POST) -> HTTP Request -> FastAPI -> LangGraph StateGraph -> JSON response
+n8n Webhook (POST) -> HTTP Request -> FastAPI -> LangGraph StateGraph -> JSON response -> If (escalated?) -> Slack-style notification
 ```
 
 - n8n receives a ticket as JSON through a webhook and forwards it to a local
@@ -17,6 +17,20 @@ n8n Webhook (POST) -> HTTP Request -> FastAPI -> LangGraph StateGraph -> JSON re
   `auto_respond`.
 - The result (category, priority, action, response) is sent back as JSON,
   through n8n.
+- An `If` node checks whether the action was `escalated_to_human`. If so,
+  a second HTTP Request node fires, sending a JSON payload in the same
+  shape Slack's incoming webhooks expect (a `text` field with the ticket
+  details filled in).
+
+## About the Slack step
+
+I don't have a Slack workspace set up for this project, so the
+notification step posts to a webhook.site test URL instead of a real
+Slack channel — I used webhook.site to confirm the payload is correctly
+formatted and the request actually fires when a ticket escalates. The
+node is built exactly the way it would be for a real Slack incoming
+webhook; pointing it at an actual Slack webhook URL instead of the test
+one is the only change needed to make it live.
 
 ## Why no real LLM call
 
@@ -45,12 +59,21 @@ going with this.
    npx n8n
    ```
    Opens the editor at `http://localhost:5678`.
-4. In the n8n editor, build a 2-node workflow:
+4. In the n8n editor, build the workflow:
    - **Webhook** node: method `POST`, path `new-ticket`
    - **HTTP Request** node: method `POST`, URL `http://127.0.0.1:8001/triage`,
      body set to JSON, body content = `{{ $json.body }}`
+   - **If** node: condition `{{ $json.action }}` is equal to `escalated_to_human`
+   - **HTTP Request** node (on the `true` branch): method `POST`, URL =
+     your webhook.site test URL (or a real Slack incoming webhook URL),
+     body set to JSON:
+     ```
+     {
+       "text": "Ticket {{ $('Webhook').item.json.body.ticket_id }} escalated to human review — category: {{ $('If').item.json.category }}, priority: {{ $('If').item.json.priority }}"
+     }
+     ```
 
-   (Note: use `127.0.0.1` rather than `localhost` in the HTTP Request
+   (Note: use `127.0.0.1` rather than `localhost` in the first HTTP Request
    node's URL — n8n didn't resolve `localhost` correctly for me locally,
    `127.0.0.1` fixed it.)
 5. Test it:
