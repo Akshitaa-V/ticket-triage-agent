@@ -1,0 +1,66 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "new-ticket",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "0f9bb6b9-0b05-4610-af33-f368f6d0620e",
+      "name": "Webhook",
+      "webhookId": "611ba9fa-6830-44dd-8244-e5fda1543686"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8001/triage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        208,
+        0
+      ],
+      "id": "1c4d11b2-e628-4ba9-8753-bbfdcc445302",
+      "name": "HTTP Request"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "8278874e-274b-41d8-b0b1-8109950b47e0",
+  "meta": {
+    "instanceId": "8c8a998bc95ce6e08d8c02faaf8fd55f311d8a7aefbfd6584758495f5aac1125"
+  },
+  "nodeGroups": [],
+  "id": "2ne1WKlqkZLMj0Mp",
+  "tags": []
+}
