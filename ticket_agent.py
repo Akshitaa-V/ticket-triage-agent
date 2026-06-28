@@ -7,9 +7,18 @@ support ticket, decides a routing action, and drafts a structured response.
 No paid API / no LLM key required: the "reasoning" steps are rule-based
 functions standing in for an LLM call, which keeps the graph runnable
 fully offline. The graph structure (state, nodes, conditional edges) is
-the same pattern used with a real LLM-backed node — swapping a rule-based
+the same pattern used with a real LLM-backed node -- swapping a rule-based
 function for `llm.invoke(...)` inside a node would make this LLM-backed
 without changing the graph topology at all.
+
+GUARD LOGIC:
+Before the agent does any classification or routing, an input guard
+checks that the incoming payload has the required fields and that they
+are non-empty. If the guard blocks the request, the agent returns a
+structured "blocked" result immediately instead of letting malformed
+input flow through to escalate_node or auto_respond_node. This is
+distinct from routing logic (which decides WHERE a valid ticket goes)
+and is checked once, up front, before any node in the graph runs.
 
 Run:
     python ticket_agent.py
@@ -18,9 +27,40 @@ Then POST to http://localhost:8001/triage with JSON like:
 """
 
 from typing import TypedDict, Literal
+from dataclasses import dataclass
 from langgraph.graph import StateGraph, END
 from fastapi import FastAPI
 import uvicorn
+
+
+# ---------- 0. Guard logic: runs BEFORE the graph, blocks malformed input ----------
+
+REQUIRED_PAYLOAD_FIELDS = ["ticket_id", "text"]
+
+
+@dataclass
+class GuardResult:
+    allowed: bool
+    reason: str = ""
+
+
+def input_guard(payload: dict) -> GuardResult:
+    """
+    Blocks a ticket from entering the agent graph at all if required
+    fields are missing or empty. Returns a GuardResult so the caller
+    can log exactly why a ticket was rejected, instead of letting it
+    silently fall through to classify_node with blank/garbage values.
+    """
+    missing = [
+        f for f in REQUIRED_PAYLOAD_FIELDS
+        if f not in payload or not str(payload[f]).strip()
+    ]
+    if missing:
+        return GuardResult(
+            allowed=False,
+            reason=f"Missing or empty required field(s): {', '.join(missing)}",
+        )
+    return GuardResult(allowed=True, reason="Payload has required fields")
 
 
 # ---------- 1. Define the agent state ----------
@@ -115,6 +155,17 @@ app = FastAPI(title="Ticket Triage Agent")
 
 @app.post("/triage")
 def triage(payload: dict):
+    # GUARD CHECK: runs before the graph touches the payload at all.
+    guard_result = input_guard(payload)
+    if not guard_result.allowed:
+        return {
+            "ticket_id": payload.get("ticket_id", "UNKNOWN"),
+            "category": "",
+            "priority": "",
+            "action": "blocked_by_guard",
+            "response": guard_result.reason,
+        }
+
     initial_state: TicketState = {
         "ticket_id": payload.get("ticket_id", "UNKNOWN"),
         "text": payload.get("text", ""),
@@ -124,7 +175,7 @@ def triage(payload: dict):
         "response": "",
     }
     result = agent.invoke(initial_state)
-    # Structured output — exactly what an n8n HTTP node expects back
+    # Structured output -- exactly what an n8n HTTP node expects back
     return {
         "ticket_id": result["ticket_id"],
         "category": result["category"],
