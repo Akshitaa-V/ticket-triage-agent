@@ -1,0 +1,8 @@
+langgraph
+fastapi
+uvicorn
+litellm
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-http
+httpx
+pytest

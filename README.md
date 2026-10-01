@@ -246,3 +246,88 @@ Expected result: 6 tests passed.
 
 \- `n8n\_workflow.json` — exported n8n workflow
 
+
+
+## v2: async FastAPI + LiteLLM + OpenTelemetry/Langfuse
+
+`async_service.py` is a second version of the service that adds the LLM call
+I left out of v1, plus the tooling I'd want around it in production. The v1
+service (`ticket_agent.py`) and the n8n workflow are unchanged, and v2 reuses
+v1's guard, routing and response nodes as they are.
+
+```
+POST /triage or /triage/batch
+  -> input_guard (v1)
+  -> classify (async): LiteLLM model 1 -> model 2 -> ... -> v1 keyword rules
+  -> route_decision (v1) -> escalate / auto_respond (v1)
+every step is an OpenTelemetry span -> Langfuse
+```
+
+**Async.** The endpoints and graph nodes are `async def`, and the graph runs
+with `agent.ainvoke`. `POST /triage/batch` triages a list of tickets
+concurrently with `asyncio.gather`, with an `asyncio.Semaphore` capping how
+many are in flight (`TRIAGE_MAX_CONCURRENCY`, default 5). Each model call has
+a timeout through `asyncio.wait_for` (`TRIAGE_LLM_TIMEOUT`, default 10 s).
+
+**LiteLLM.** The classify node calls `litellm.acompletion`, so switching
+between OpenAI, Anthropic and Gemini is only a change to the model string.
+`TRIAGE_MODELS` is a comma-separated list tried in order. If a model errors,
+times out or returns JSON outside the allowed categories, the next one is
+tried. If all of them fail, or none are set, the v1 keyword rules decide, so
+a ticket is never left unclassified. The response's `classified_by` field
+says which one was used (`llm:<model>` or `rules`).
+
+**Tracing.** Each request is one trace: a `triage` span, a span per graph
+node, and an `llm.classify` span per model attempt. The LLM span is marked as
+a Langfuse generation and carries the model, prompt, completion and token
+usage (`gen_ai.*` attributes). Spans go to Langfuse's OpenTelemetry endpoint
+(`/api/public/otel`) through the standard OTLP exporter, so the code depends
+on OpenTelemetry rather than on the Langfuse SDK, and failed attempts show up
+as error spans with the reason (for example `TimeoutError`).
+
+### Running v2
+
+```
+pip install -r requirements.txt
+cp .env.example .env    # add one provider key, and Langfuse keys if you want traces
+set -a; source .env; set +a
+uvicorn async_service:app --port 8002
+```
+
+```
+curl -X POST http://127.0.0.1:8002/triage \
+  -H "Content-Type: application/json" \
+  -d '{"ticket_id": "T-201", "text": "I was charged twice, please refund me asap"}'
+
+curl -X POST http://127.0.0.1:8002/triage/batch \
+  -H "Content-Type: application/json" \
+  -d '{"tickets": [{"ticket_id": "T-202", "text": "app crashes on login"},
+                   {"ticket_id": "T-203", "text": "what are your opening hours"}]}'
+```
+
+Without `TRIAGE_MODELS` the service still runs offline on the keyword rules,
+like v1.
+
+### How v2 is tested
+
+`test_async_service.py` has 14 tests that need no API key. The LLM path runs
+through the real `litellm.acompletion` using LiteLLM's `mock_response`
+option, and an in-memory OpenTelemetry exporter checks the spans. The tests
+cover:
+
+- the LLM's answer overriding the keyword rules
+- fallback to the second model when the first errors
+- fallback to rules on invalid JSON and on timeout
+- the guard over HTTP
+- the generation attributes Langfuse reads
+- all spans of one request sharing a trace
+- the batch endpoint running concurrently (5 slow calls finish in under 0.9 s instead of 1.5 s)
+- the batch endpoint never exceeding its concurrency limit
+
+I also ran the service against a local stand-in for the Langfuse endpoint to
+check that spans arrive on `/api/public/otel/v1/traces` with the right Basic
+auth header.
+
+```
+pytest -q    # 20 passed (6 v1 + 14 v2)
+```
